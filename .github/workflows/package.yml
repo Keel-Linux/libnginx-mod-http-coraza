@@ -1,39 +1,32 @@
 # Build, lint and test this package on trixie (handbook decision 0041,
-# first implementation, step 5). The checks are "package / build" and
-# "package / autopkgtest".
+# first implementation, step 5). The checks are "build / trixie" and
+# "autopkgtest / trixie".
+#
+# Both jobs run in a Debian trixie system container, an unprivileged LXC
+# container with its own systemd on the self-hosted runner keel-lxc-1,
+# through the reusable workflow lxc-trixie.yml of Keel-Linux/.github. Keel
+# runs no application containers in CI, and the runner only accepts jobs
+# from the organization's reusable workflows.
 #
 # build: libcoraza and coreruleset are not in Debian, so their keel/trixie
 # branches are built first (libcoraza with golang-1.26-go from
 # trixie-backports, tests skipped; their own CI runs them) and
 # libcoraza-dev is installed. This package is then built with gbp
-# buildpackage in a debian:trixie container with trixie-backports enabled,
-# source and binary, the orig tarball rebuilt from the pristine-tar branch,
-# and lintian checks the .changes: any error or warning fails the job, as
-# packages/build of Keel-Linux/common does. Nothing is signed or
-# published; the files are kept as the artifacts "debs" and "keel-deps".
+# buildpackage with trixie-backports enabled, source and binary, the orig
+# tarball rebuilt from the pristine-tar branch, and lintian checks the
+# .changes: any error or warning fails the job, as packages/build of
+# Keel-Linux/common does. Nothing is signed or published; the files are
+# kept as the artifact "debs", the two dependencies' binary packages in its
+# keel-deps directory.
 #
 # autopkgtest: debian/tests/crs-blocks restarts nginx with systemctl, so it
-# runs in a system container: a trixie LXC container with its own systemd,
-# booted on the self-hosted runner keel-lxc-1 (labels self-hosted,
-# keel-lxc), as Keel-Linux/.github's test-appliance.yml boots appliances.
-# The container comes from the LXC download template, autopkgtest is
-# installed inside it, and the test runs there with autopkgtest's null
-# runner; the container is the isolation that isolation-container asks for,
-# and keel-ci-cleanup removes it. Nothing is installed on the runner: the
-# job uses only the lxc-* commands of the runner's sudo policy and
-# keel-ci-cleanup. autopkgtest-virt-lxc is not used because the runner has
-# no autopkgtest package and its sudo policy has no lxc-copy.
+# waits for the container's systemd, installs autopkgtest inside the
+# container and runs the test there with autopkgtest's null runner; the
+# container is the isolation that isolation-container asks for.
 #
-# build stays on a GitHub-hosted runner in a debian:trixie job container,
-# as Keel-Linux/common's packages.yml builds its packages.
-#
-# Keel-Linux/.github's reusable build-deb.yml does not fit: it builds with
-# dpkg-buildpackage -b on the self-hosted runner, which has no build tools,
-# and neither uses gbp nor lints. This workflow follows Keel-Linux/common's
-# packages.yml instead.
-#
-# A pull request from a fork never reaches the self-hosted runner: the
-# autopkgtest job runs only for this repository's own branches.
+# A pull request from a fork never reaches the self-hosted runner: both jobs
+# run only for this repository's own branches, so a fork pull request gets
+# no build, lint or autopkgtest result here.
 name: package
 
 on:
@@ -45,140 +38,71 @@ on:
 permissions:
   contents: read
 
-env:
-  DEBIAN_FRONTEND: noninteractive
-
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    timeout-minutes: 45
-    steps:
-      - name: Enable trixie-backports and install the tools
-        run: |
-          echo 'deb http://deb.debian.org/debian trixie-backports main' \
-            > /etc/apt/sources.list.d/trixie-backports.list
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends \
-            ca-certificates git git-buildpackage pristine-tar \
-            devscripts equivs lintian
-          git config --global --add safe.directory '*'
-      - name: Build libcoraza and coreruleset from their keel/trixie
-        env:
-          DEB_BUILD_OPTIONS: nocheck
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/deps-area" keel-deps
-          for repo in libcoraza coreruleset; do
-            src="$RUNNER_TEMP/src/$repo"
-            git clone -q --branch keel/trixie \
-              "https://github.com/Keel-Linux/$repo.git" "$src"
-            for branch in upstream/latest pristine-tar; do
-              git -C "$src" branch -q "$branch" "origin/$branch"
-            done
-            (cd "$src" && gbp setup-gitattributes)
-            (cd "$RUNNER_TEMP" && mk-build-deps --install --remove \
-              --tool 'apt-get -y -qq --no-install-recommends' \
-              "$src/debian/control")
-            (cd "$src" && gbp buildpackage \
-              --git-export-dir="$RUNNER_TEMP/deps-area" \
-              --git-builder='dpkg-buildpackage -us -uc -b')
-          done
-          cp "$RUNNER_TEMP"/deps-area/*.deb keel-deps/
-          rm -f keel-deps/*-dbgsym_*.deb
-          ls -l keel-deps
-          apt-get install -y -qq --no-install-recommends \
-            ./keel-deps/libcoraza1_*.deb ./keel-deps/libcoraza-dev_*.deb
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          path: src
-      - name: Track the upstream and pristine-tar branches
-        working-directory: src
-        run: |
-          # As gbp clone does: upstream's .gitattributes must not change
-          # what is exported, or the tree no longer matches the orig tarball.
-          gbp setup-gitattributes
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: keel-linux/.github/.github/workflows/lxc-trixie.yml@ci/lxc-trixie
+    with:
+      backports: true
+      fetch-depth: 0
+      timeout: 45
+      artifact-dir: dist
+      artifact-name: debs
+      run: |
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends \
+          ca-certificates git git-buildpackage pristine-tar \
+          devscripts equivs lintian
+        mkdir -p /tmp/deps-area /tmp/keel-deps
+        for repo in libcoraza coreruleset; do
+          src=/tmp/src/$repo
+          git clone -q --branch keel/trixie \
+            "https://github.com/Keel-Linux/$repo.git" "$src"
           for branch in upstream/latest pristine-tar; do
-            git branch -f "$branch" "origin/$branch"
+            git -C "$src" branch -q "$branch" "origin/$branch"
           done
-      - name: Install the build dependencies
-        run: |
-          cd "$RUNNER_TEMP"
-          mk-build-deps --install --remove \
+          (cd "$src" && gbp setup-gitattributes)
+          (cd /tmp && mk-build-deps --install --remove \
             --tool 'apt-get -y -qq --no-install-recommends' \
-            "$GITHUB_WORKSPACE/src/debian/control"
-      - name: Build
-        working-directory: src
-        run: |
-          gbp buildpackage --git-ignore-branch \
-            --git-export-dir="$RUNNER_TEMP/build-area" \
-            --git-builder='dpkg-buildpackage -us -uc'
-          mkdir ../dist
-          cp "$RUNNER_TEMP"/build-area/*.deb "$RUNNER_TEMP"/build-area/*.dsc \
-            "$RUNNER_TEMP"/build-area/*.tar.* "$RUNNER_TEMP"/build-area/*.buildinfo \
-            "$RUNNER_TEMP"/build-area/*.changes ../dist/
-      - name: Lint
-        run: |
-          lintian --fail-on error,warning --info --display-info \
-            dist/*.changes
-      - uses: actions/upload-artifact@v4
-        with:
-          name: debs
-          path: dist/
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: keel-deps
-          path: keel-deps/
-          if-no-files-found: error
+            "$src/debian/control")
+          (cd "$src" && DEB_BUILD_OPTIONS=nocheck gbp buildpackage \
+            --git-export-dir=/tmp/deps-area \
+            --git-builder='dpkg-buildpackage -us -uc -b')
+        done
+        cp /tmp/deps-area/*.deb /tmp/keel-deps/
+        rm -f /tmp/keel-deps/*-dbgsym_*.deb
+        ls -l /tmp/keel-deps
+        apt-get install -y -qq --no-install-recommends \
+          /tmp/keel-deps/libcoraza1_*.deb /tmp/keel-deps/libcoraza-dev_*.deb
+        # As gbp clone does: upstream's .gitattributes must not change what
+        # is exported, or the tree no longer matches the orig tarball.
+        gbp setup-gitattributes
+        for branch in upstream/latest pristine-tar; do
+          git branch -f "$branch" "origin/$branch"
+        done
+        (cd /tmp && mk-build-deps --install --remove \
+          --tool 'apt-get -y -qq --no-install-recommends' /src/debian/control)
+        gbp buildpackage --git-ignore-branch \
+          --git-export-dir=/tmp/build-area \
+          --git-builder='dpkg-buildpackage -us -uc'
+        lintian --fail-on error,warning --info --display-info \
+          /tmp/build-area/*.changes
+        mkdir -p dist/keel-deps
+        cp /tmp/build-area/*.deb /tmp/build-area/*.dsc /tmp/build-area/*.tar.* \
+          /tmp/build-area/*.buildinfo /tmp/build-area/*.changes dist/
+        cp /tmp/keel-deps/*.deb dist/keel-deps/
 
   autopkgtest:
     needs: build
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, keel-lxc]
-    timeout-minutes: 30
-    env:
-      NAME: keel-pkg-${{ github.event.repository.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-      SCRATCH: /var/tmp/keel-ci/keel-pkg-${{ github.event.repository.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: debs
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: keel-deps
-          path: dist
-      - name: Boot a trixie LXC container
-        run: |
-          set -eu
-          lxc() { sudo -n "/usr/bin/lxc-$1" -P "$SCRATCH/lxc" -n "$NAME" "${@:2}"; }
-          mkdir -p "$SCRATCH/lxc"
-          lxc create -t download -- -d debian -r trixie -a amd64
-          lxc start
-          lxc wait -s RUNNING -t 60
-          state=
-          for _ in $(seq 60); do
-            state=$(lxc attach -- systemctl is-system-running 2>/dev/null || true)
-            case "$state" in running|degraded) break ;; esac
-            sleep 2
-          done
-          echo "systemd: $state"
-          case "$state" in running|degraded) ;; *) exit 1 ;; esac
-      - name: Install autopkgtest in the container and copy the packages in
-        run: |
-          set -eu
-          lxc() { sudo -n "/usr/bin/lxc-$1" -P "$SCRATCH/lxc" -n "$NAME" "${@:2}"; }
-          lxc attach --clear-env -- env DEBIAN_FRONTEND=noninteractive \
-            sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends autopkgtest dpkg-dev'
-          tar -C dist -cf - . | lxc attach -- sh -c 'mkdir -p /dist && tar -C /dist -xf -'
-      - name: Run debian/tests
-        run: |
-          set -eu
-          lxc() { sudo -n "/usr/bin/lxc-$1" -P "$SCRATCH/lxc" -n "$NAME" "${@:2}"; }
-          lxc attach --clear-env -- sh -c \
-            'autopkgtest --ignore-restrictions=isolation-container /dist/*.dsc /dist/*.deb -- null'
-      - name: Remove the container
-        if: always()
-        run: sudo -n /usr/local/sbin/keel-ci-cleanup "$NAME" "$SCRATCH" || true
+    uses: keel-linux/.github/.github/workflows/lxc-trixie.yml@ci/lxc-trixie
+    with:
+      systemd: true
+      timeout: 30
+      download: debs
+      download-dir: dist
+      run: |
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends autopkgtest dpkg-dev
+        autopkgtest --ignore-restrictions=isolation-container \
+          dist/*.dsc dist/*.deb dist/keel-deps/*.deb -- null
