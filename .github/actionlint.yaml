@@ -1,0 +1,4 @@
+# The label of the self-hosted runner keel-lxc-1, as in Keel-Linux/.github.
+self-hosted-runner:
+  labels:
+    - keel-lxc
