@@ -8,10 +8,13 @@ Description: Hold the body in memory whenever the response headers are held
  gzip stream (200, 20 bytes). Asking for the body in memory whenever the
  headers are held makes the copy filter read the file, so gzip and every
  other filter that needs the bytes get them. Upstream's PR #142 (issue
- #140) covers part of this.
+ #140) covers part of this: it finalises phase 4 before the headers when
+ the body will not be inspected, but the held-headers case stays; this
+ patch is not forwarded as is and is dropped once upstream covers it.
 Author: Marcos Mendez <mendez.foto@gmail.com>
-Bug: https://github.com/Keel-Linux/libnginx-mod-http-coraza/issues/2
-Forwarded: no
+Bug: https://github.com/corazawaf/coraza-nginx/issues/140
+Bug-Keel: https://github.com/Keel-Linux/libnginx-mod-http-coraza/issues/2
+Forwarded: no, related to https://github.com/corazawaf/coraza-nginx/pull/142
 Last-Update: 2026-10-01
 ---
 --- a/src/ngx_http_coraza_header_filter.c
