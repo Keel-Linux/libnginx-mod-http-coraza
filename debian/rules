@@ -1,6 +1,9 @@
 #!/usr/bin/make -f
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+# libcoraza's cgo header defines static callbacks the module does not call
+# (README.md upstream, "Compilation").
+export DEB_CFLAGS_MAINT_APPEND = -Wno-unused-function
 
 %:
 	dh $@

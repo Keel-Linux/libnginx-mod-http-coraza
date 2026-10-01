@@ -1,0 +1,15 @@
+libnginx-mod-http-coraza source for Keel Linux
+==============================================
+
+The repository follows DEP-14 as git-buildpackage repositories on salsa
+do: upstream/latest holds the imported upstream tarballs, pristine-tar
+their deltas, and keel/trixie this package.
+
+The orig tarball is upstream's GitHub release archive:
+
+  https://github.com/corazawaf/coraza-nginx/archive/refs/tags/v0.21.0.tar.gz
+  libnginx-mod-http-coraza_0.21.0.orig.tar.gz
+  sha256 ff0e9d07003f9514402a7b1e7c44b500d29505a18088a95fce17df84f03835c8
+
+Upstream ships a debian/ directory of its own; this package replaces it.
+soname-dlopen.patch comes from it.

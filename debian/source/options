@@ -1,0 +1,4 @@
+# .github/ holds this repository's README and CI on GitHub. It is not
+# part of the source package: upstream's .github/ is removed on the
+# packaging branch and Keel's is ignored here.
+extend-diff-ignore = "^\.github/"

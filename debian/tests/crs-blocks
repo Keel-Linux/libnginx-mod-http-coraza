@@ -1,0 +1,101 @@
+#!/bin/sh
+# The module loads into trixie's nginx, and with the OWASP Core Rule Set
+# of the coreruleset package a normal request gets 200 while SQL injection
+# and cross-site scripting payloads get 403 (handbook decision 0041, step
+# 5). A server of its own on 127.0.0.1:8088, removed afterwards.
+set -eu
+
+PORT=8088
+SITE=/etc/nginx/conf.d/zz-coraza-autopkgtest.conf
+ROOT=/srv/coraza-autopkgtest
+ERROR_LOG=/var/log/nginx/coraza-autopkgtest.error.log
+AUDIT_LOG=$ROOT/audit/audit.log
+FAILED=0
+
+cleanup() {
+    rm -f "$SITE" "$ERROR_LOG"
+    rm -rf "$ROOT"
+    systemctl reload nginx || true
+}
+trap cleanup EXIT
+
+expect() {
+    want=$1 path=$2
+    got=$(curl --silent --max-time 30 --output /dev/null \
+        --write-out '%{http_code}' "http://127.0.0.1:$PORT$path")
+    if [ "$got" = "$want" ]; then
+        echo "ok: $path -> $got"
+    else
+        echo "FAIL: $path -> $got, expected $want"
+        FAILED=1
+    fi
+}
+
+mkdir -p "$ROOT/html" "$ROOT/audit"
+echo "coraza autopkgtest" >"$ROOT/html/index.html"
+chmod -R a+rX "$ROOT"
+# The workers write Coraza's audit log, which names the rules that matched.
+chown www-data "$ROOT/audit"
+
+cat >"$SITE" <<EOF
+server {
+    listen 127.0.0.1:$PORT;
+    server_name localhost;
+    root $ROOT/html;
+    error_log $ERROR_LOG;
+
+    coraza on;
+    coraza_transaction_id \$request_id;
+    coraza_rules 'SecRuleEngine On
+                  SecAuditEngine RelevantOnly
+                  SecAuditLogParts ABHZ
+                  SecAuditLogType Serial
+                  SecAuditLog $AUDIT_LOG';
+    coraza_rules_file /usr/share/coreruleset/coreruleset.load;
+}
+EOF
+
+echo "== the module is enabled"
+ls -l /etc/nginx/modules-enabled/ | grep -F mod-http-coraza
+
+echo "== nginx -t"
+nginx -t
+
+systemctl restart nginx
+# The rule set is compiled in each worker after the fork; wait until the
+# server answers.
+for _ in $(seq 1 30); do
+    curl --silent --output /dev/null "http://127.0.0.1:$PORT/" && break
+    sleep 1
+done
+
+echo "== libcoraza is loaded in the workers"
+worker=$(pgrep -f 'nginx: worker process' | head -n 1)
+grep -m 1 -F libcoraza.so.1 "/proc/$worker/maps"
+
+echo "== requests"
+expect 200 "/"
+expect 200 "/index.html?q=coraza"
+expect 403 "/?id=1%20OR%201=1"
+expect 403 "/?id=1%27%20UNION%20SELECT%20password%20FROM%20users--"
+expect 403 "/?x=%3Cscript%3Ealert(1)%3C/script%3E"
+expect 403 "/?file=../../../../etc/passwd"
+
+echo "== denials in the error log"
+denied=$(grep -c 'Coraza: Access denied with code 403' "$ERROR_LOG" || true)
+echo "$denied"
+if [ "$denied" -ne 4 ]; then
+    echo "FAIL: $denied denials logged, expected 4"
+    FAILED=1
+fi
+
+echo "== CRS rules that matched, from the audit log"
+grep -o 'id "9[0-9]*"' "$AUDIT_LOG" | sort | uniq -c
+for id in 942100 941100 930100 949110; do
+    grep -q "id \"$id\"" "$AUDIT_LOG" || {
+        echo "FAIL: CRS rule $id did not match"
+        FAILED=1
+    }
+done
+
+exit "$FAILED"

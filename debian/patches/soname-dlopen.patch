@@ -4,6 +4,7 @@ Description: Use SONAME-versioned library name for dlopen
  is only in the -dev package. Adjust the dlopen extension to use
  the SONAME major version.
 Author: Pierre Pomes <pierre.pomes@gmail.com>
+Origin: vendor, https://github.com/corazawaf/coraza-nginx/blob/v0.21.0/debian/patches/soname-dlopen.patch
 Forwarded: not-needed
 Last-Update: 2026-03-18
 ---

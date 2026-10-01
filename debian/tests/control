@@ -1,0 +1,7 @@
+Tests: crs-blocks
+Depends:
+ @,
+ coreruleset,
+ curl,
+ nginx,
+Restrictions: allow-stderr, isolation-container, needs-root

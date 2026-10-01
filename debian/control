@@ -1,19 +1,33 @@
 Source: libnginx-mod-http-coraza
 Section: httpd
 Priority: optional
-Maintainer: Pierre Pomes <pierre.pomes@gmail.com>
-Build-Depends: debhelper-compat (= 13),
-               dh-sequence-nginx,
-               libcoraza-dev (>= 1.7)
-Standards-Version: 4.7.0
+Maintainer: KeelLinux maintainers <admin@keellinux.org>
+Uploaders: Marcos Mendez <mendez.foto@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-sequence-nginx,
+ libcoraza-dev (>= 1.7.0),
+Standards-Version: 4.7.2
 Homepage: https://github.com/corazawaf/coraza-nginx
 Rules-Requires-Root: no
+Vcs-Git: https://github.com/Keel-Linux/libnginx-mod-http-coraza.git -b keel/trixie
+Vcs-Browser: https://github.com/Keel-Linux/libnginx-mod-http-coraza
 
 Package: libnginx-mod-http-coraza
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, libcoraza1 (>= 1.7)
-Description: Coraza WAF connector module for nginx
- Coraza is an open-source Web Application Firewall (WAF) engine.
- This module integrates the Coraza WAF with the nginx web server,
- providing request inspection and blocking capabilities using
- OWASP Core Rule Set (CRS) v4 compatible rules.
+Multi-Arch: foreign
+Depends:
+ libcoraza1 (>= 1.7.0),
+ ${misc:Depends},
+ ${shlibs:Depends},
+Recommends:
+ nginx,
+Suggests:
+ coreruleset,
+Description: OWASP Coraza web application firewall module for Nginx
+ Coraza is a web application firewall engine that reads ModSecurity's rule
+ language (SecLang) and runs the OWASP Core Rule Set. This module runs it
+ inline in Nginx, per server or location, with the directives coraza,
+ coraza_rules and coraza_rules_file.
+ .
+ The engine is loaded from libcoraza in each worker process.
