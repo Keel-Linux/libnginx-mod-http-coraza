@@ -5,3 +5,12 @@ Depends:
  curl,
  nginx,
 Restrictions: allow-stderr, isolation-container, needs-root
+
+Tests: gzip-static
+Depends:
+ @,
+ coreruleset,
+ curl,
+ gzip,
+ nginx,
+Restrictions: allow-stderr, isolation-container, needs-root

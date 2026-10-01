@@ -1,1 +1,2 @@
 soname-dlopen.patch
+delay-headers-in-memory.patch
