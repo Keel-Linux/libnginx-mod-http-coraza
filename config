@@ -1,0 +1,114 @@
+# vim: filetype=sh
+
+# If $NGX_IGNORE_RPATH is set to "YES", we will ignore explicit
+# library path specification on resulting binary, allowing libcoraza.so
+# to be relocated across configured library pathes (adjust /etc/ld.so.conf
+# or set $LD_LIBRARY_PATH environment variable to manage them)
+#
+# $YAJL_LIB variable may need to be populated in case of non-standard
+# path of libyajl.so's installation
+
+ngx_addon_name="ngx_http_coraza_module"
+
+# Require libcoraza >= 1.7.0 at build time.
+#
+# From 1.5 the coraza_process_* calls use the tri-state coraza_result_t
+# contract (CORAZA_ERROR = -1, CORAZA_OK = 0, CORAZA_INTERRUPTION = 1), so
+# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6.
+# coraza_version_num() first appears in 1.7.0 and reports the library version.
+#
+# Compile-only probe (nginx's auto/feature): coraza_version_num() is declared in
+# coraza.h from 1.7.0, so `sizeof(coraza_version_num())` compiles iff the header
+# is >= 1.7 -- configure then fails cleanly against older headers rather than
+# silently building against an old ABI. sizeof leaves its operand unevaluated, so
+# this needs no reference to the symbol at link and nothing is run: no -lcoraza,
+# no libcoraza.so on any path, and cross-compilation works. It uses the same
+# compiler and include flags the module is built with, so a coraza.h supplied via
+# --with-cc-opt=-I<dir> is picked up. The exact version number is re-checked at
+# runtime when the module dlopen's libcoraza (ngx_http_coraza_dl_open) -- this is
+# the build-time half.
+ngx_feature="libcoraza >= 1.7.0 (coraza_version_num)"
+ngx_feature_name=
+ngx_feature_run=no
+ngx_feature_incs="#include <coraza/coraza.h>"
+ngx_feature_path=
+ngx_feature_libs=
+ngx_feature_test="(void) sizeof(coraza_version_num());"
+. auto/feature
+
+if test $ngx_found != yes; then
+    cat << END
+
+$0: error: the coraza-nginx module requires libcoraza >= 1.7.0, but the
+libcoraza available at build time is older or does not report its version
+(coraza_version_num). Install libcoraza >= 1.7.0 and retry.
+
+END
+    exit 1
+fi
+
+coraza_dependency="ngx_http_postpone_filter_module \
+                   ngx_http_ssi_filter_module \
+                   ngx_http_charset_filter_module \
+                   ngx_http_xslt_filter_module \
+                   ngx_http_image_filter_module \
+                   ngx_http_sub_filter_module \
+                   ngx_http_addition_filter_module \
+                   ngx_http_gunzip_filter_module \
+                   ngx_http_userid_filter_module \
+                   ngx_http_headers_filter_module \
+                   ngx_http_copy_filter_module";
+
+
+if test -n "$ngx_module_link"; then
+	ngx_module_type=HTTP_FILTER
+	ngx_module_name="$ngx_addon_name"
+	ngx_module_srcs="$ngx_addon_dir/src/ngx_http_coraza_module.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_pre_access.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_header_filter.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_log.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_utils.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_dl.c";
+
+	ngx_module_deps="$ngx_addon_dir/src/ddebug.h \
+                     $ngx_addon_dir/src/ngx_http_coraza_common.h";
+    ngx_module_libs="-ldl"
+
+    ngx_module_order="ngx_http_chunked_filter_module \
+                      ngx_http_v2_filter_module \
+                      ngx_http_range_header_filter_module \
+                      ngx_http_gzip_filter_module \
+                      $ngx_module_name \
+                      $coraza_dependency";
+
+	. auto/module
+else
+	CFLAGS="-I /usr/local/include $CFLAGS"
+	NGX_LD_OPT="-ldl $NGX_LD_OPT"
+
+	CORE_INCS="$CORE_INCS $ngx_feature_path"
+	CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
+
+	# Appending here places the coraza filter immediately before
+	# ngx_http_copy_filter_module in objs/ngx_modules.c, i.e. after the
+	# chunked/range/postpone filters -- the same effective position the
+	# dynamic build gets from $ngx_module_order above.  $ngx_module_order
+	# has no effect on this branch (it is only consumed by auto/module),
+	# so the ordering here is positional and must not be reordered.
+	HTTP_FILTER_MODULES="$HTTP_FILTER_MODULES ngx_http_coraza_module"
+	NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
+                    $ngx_addon_dir/src/ngx_http_coraza_module.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_pre_access.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_header_filter.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_log.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_utils.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_dl.c";
+
+	NGX_ADDON_DEPS="$NGX_ADDON_DEPS \
+                    $ngx_addon_dir/src/ddebug.h \
+                    $ngx_addon_dir/src/ngx_http_coraza_common.h";
+fi
