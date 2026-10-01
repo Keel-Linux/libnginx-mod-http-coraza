@@ -1,0 +1,87 @@
+#!/bin/sh
+# A static file answered with gzip while Coraza is on comes back whole
+# (Keel-Linux/libnginx-mod-http-coraza#2). With sendfile on, as Debian's
+# nginx.conf has it, and the response headers held for phase 4, the file
+# went out as a file buffer before gzip asked for it in memory, and the
+# client got an empty gzip stream: 200, 20 bytes, nothing inside.
+# delay-headers-in-memory.patch fixes it. A server of its own on
+# 127.0.0.1:8089, removed afterwards.
+set -eu
+
+PORT=8089
+SITE=/etc/nginx/conf.d/zz-coraza-gzip-autopkgtest.conf
+ROOT=/srv/coraza-gzip-autopkgtest
+FAILED=0
+
+cleanup() {
+    rm -f "$SITE"
+    rm -rf "$ROOT"
+    systemctl reload nginx || true
+}
+trap cleanup EXIT
+
+mkdir -p "$ROOT/html"
+# a page well above gzip_min_length, so gzip compresses it
+for _ in $(seq 1 50); do
+    echo "<p>coraza gzip autopkgtest, a line of a static page</p>"
+done >"$ROOT/html/index.html"
+chmod -R a+rX "$ROOT"
+size=$(stat -c %s "$ROOT/html/index.html")
+
+cat >"$SITE" <<EOF
+server {
+    listen 127.0.0.1:$PORT;
+    server_name localhost;
+    root $ROOT/html;
+    sendfile on;
+    gzip on;
+
+    coraza on;
+    coraza_rules 'SecRuleEngine On';
+    coraza_rules_file /usr/share/coreruleset/coreruleset.load;
+}
+EOF
+
+nginx -t
+systemctl restart nginx
+for _ in $(seq 1 30); do
+    curl --silent --output /dev/null "http://127.0.0.1:$PORT/" && break
+    sleep 1
+done
+
+check() {
+    label=$1
+    shift
+    headers=$(mktemp)
+    body=$(mktemp)
+    curl --silent --max-time 30 --dump-header "$headers" --output "$body" "$@" \
+        "http://127.0.0.1:$PORT/index.html"
+    if grep -qi '^content-encoding: gzip' "$headers"; then
+        got=$(gzip -dc "$body" | wc -c)
+        encoding=gzip
+    else
+        got=$(wc -c <"$body")
+        encoding=identity
+    fi
+    if [ "$got" -eq "$size" ]; then
+        echo "ok: $label: $encoding, $got of $size bytes"
+    else
+        echo "FAIL: $label: $encoding, $got of $size bytes"
+        FAILED=1
+    fi
+    rm -f "$headers" "$body"
+}
+
+echo "== a static file, with and without gzip, Coraza on"
+check "no Accept-Encoding"
+check "Accept-Encoding: gzip" --header 'Accept-Encoding: gzip'
+
+echo "== the gzip answer was compressed"
+curl --silent --max-time 30 --dump-header - --output /dev/null \
+    --header 'Accept-Encoding: gzip' "http://127.0.0.1:$PORT/index.html" \
+    | grep -i '^content-encoding: gzip' || {
+        echo "FAIL: not compressed, so the case was not tested"
+        FAILED=1
+    }
+
+exit "$FAILED"

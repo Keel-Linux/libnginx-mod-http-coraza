@@ -1,0 +1,38 @@
+Description: Hold the body in memory whenever the response headers are held
+ With coraza_delay_response_headers on (the default) the header filter holds
+ the response headers until phase 4, and sets r->filter_need_in_memory only
+ when the body is inspected (SecResponseBodyAccess On). The header filters
+ after it, gzip among them, run only when the headers are released, after
+ the body filter has passed the body on; with sendfile on, a static file is
+ then a file buffer that gzip cannot read, and the client gets an empty
+ gzip stream (200, 20 bytes). Asking for the body in memory whenever the
+ headers are held makes the copy filter read the file, so gzip and every
+ other filter that needs the bytes get them. Upstream's PR #142 (issue
+ #140) covers part of this.
+Author: Marcos Mendez <mendez.foto@gmail.com>
+Bug: https://github.com/Keel-Linux/libnginx-mod-http-coraza/issues/2
+Forwarded: no
+Last-Update: 2026-10-01
+---
+--- a/src/ngx_http_coraza_header_filter.c
++++ b/src/ngx_http_coraza_header_filter.c
+@@ -703,11 +703,15 @@ ngx_http_coraza_header_filter(ngx_http_r
+         /*
+          * Delay sending headers until phase 4 completes so that
+          * phase 4 rules can still return a clean error page.
+-         * Only force body into memory when body inspection is needed.
++         *
++         * Force the body into memory whenever the headers are held, not
++         * only when it is inspected: the header filters after this one
++         * (gzip, sub_filter, ...) run only when the headers are released,
++         * after the body filter has already passed a sendfile buffer on,
++         * so a filter that needs the body in memory asks too late and
++         * gzip sends an empty stream (Keel-Linux/libnginx-mod-http-coraza#2).
+          */
+-        if (ctx->response_body_processable) {
+-            r->filter_need_in_memory = 1;
+-        }
++        r->filter_need_in_memory = 1;
+         ctx->headers_delayed = 1;
+         ctx->pending_chain = NULL;
+         ctx->pending_chain_last = &ctx->pending_chain;

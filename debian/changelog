@@ -1,3 +1,15 @@
+libnginx-mod-http-coraza (0.21.0-0keel2) trixie; urgency=medium
+
+  * delay-headers-in-memory.patch: ask for the body in memory whenever the
+    response headers are held, not only when it is inspected. With sendfile
+    on, a static file answered with gzip came back as an empty gzip stream
+    (#2): gzip's header filter runs only when the held headers are released,
+    after the body filter has passed the file buffer on.
+  * autopkgtest gzip-static: a static file, with sendfile and gzip on and
+    Coraza with the Core Rule Set, comes back whole with and without gzip.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Thu, 01 Oct 2026 21:00:00 +0000
+
 libnginx-mod-http-coraza (0.21.0-0keel1) trixie; urgency=medium
 
   * First Keel package (handbook decision 0041, first implementation,
