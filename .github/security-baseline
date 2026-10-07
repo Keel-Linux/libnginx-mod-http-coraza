@@ -1,0 +1,4 @@
+# Security scan baseline (keel-linux/.github, security-scan.yml): findings
+# that were read and are not a risk, one per line, the fingerprint and why.
+shellcheck:SC2089:build.sh:cc382abb395c shell lint, not a security risk: TEST_NGINX_GLOBALS carries literal quotes for the nginx test harness, as intended
+shellcheck:SC2090:build.sh:ea10bf8b2ff6 shell lint, not a security risk: the variable is exported for the test harness, never word-split by this script
