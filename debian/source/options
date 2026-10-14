@@ -1,4 +1,5 @@
-# .github/ holds this repository's README and CI on GitHub. It is not
-# part of the source package: upstream's .github/ is removed on the
-# packaging branch and Keel's is ignored here.
-extend-diff-ignore = "^\.github/"
+# .github/ holds this repository's README and CI on GitHub, and .forgejo/
+# its CI on git.pop.coop (decision 0056). They are not part of the source
+# package: upstream's .github/ is removed on the packaging branch and
+# Keel's two directories are ignored here.
+extend-diff-ignore = "^\.(github|forgejo)/"
