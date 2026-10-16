@@ -1,46 +1,19 @@
-# Build, lint and test this package on trixie (handbook decision 0041,
-# first implementation, step 5). The checks are "build / trixie" and
-# "autopkgtest / trixie".
+# Light CI on GitHub-hosted runners, for pull requests on the GitHub mirror
+# (decision 0056). The full CI is .forgejo/workflows on git.pop.coop, and
+# .forgejo/workflows/package.yml has the notes on each job.
 #
-# Both jobs run in a Debian trixie system container, an unprivileged LXC
-# container with its own systemd on the self-hosted runner keel-lxc-1,
-# through the reusable workflow lxc-trixie.yml of Keel-Linux/.github. Keel
-# runs no application containers in CI, and the runner only accepts jobs
-# from the organization's reusable workflows.
-#
-# build: libcoraza and coreruleset are not in Debian, so their keel/trixie
-# branches are built first (libcoraza with golang-1.26-go from
-# trixie-backports, tests skipped; their own CI runs them) and
-# libcoraza-dev is installed. This package is then built with gbp
-# buildpackage with trixie-backports enabled, source and binary, the orig
-# tarball rebuilt from the pristine-tar branch, and lintian checks the
-# .changes: any error or warning fails the job, as packages/build of
-# Keel-Linux/common does. Nothing is signed or published; the files are
-# kept as the artifact "debs", the two dependencies' binary packages in its
-# keel-deps directory.
-#
-# autopkgtest: debian/tests/crs-blocks restarts nginx with systemctl, so it
-# waits for the container's systemd, installs autopkgtest inside the
-# container and runs the test there with autopkgtest's null runner; the
-# container is the isolation that isolation-container asks for.
-#
-# A pull request from a fork never reaches the self-hosted runner: both jobs
-# run only for this repository's own branches, so a fork pull request gets
-# no build, lint or autopkgtest result here.
+# Jobs on Forgejo only (no GitHub-hosted version): autopkgtest.
 name: package
 
 on:
   pull_request:
-  push:
-    branches: [keel/trixie]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
-    uses: keel-linux/.github/.github/workflows/lxc-trixie.yml@main
+    uses: keel-linux/.github/.github/workflows/github-debian-build.yml@main
     with:
       backports: true
       fetch-depth: 0
@@ -90,17 +63,3 @@ jobs:
         cp /tmp/build-area/*.deb /tmp/build-area/*.dsc /tmp/build-area/*.tar.* \
           /tmp/build-area/*.buildinfo /tmp/build-area/*.changes dist/
         cp /tmp/keel-deps/*.deb dist/keel-deps/
-
-  autopkgtest:
-    needs: build
-    uses: keel-linux/.github/.github/workflows/lxc-trixie.yml@main
-    with:
-      systemd: true
-      timeout: 30
-      download: debs
-      download-dir: dist
-      run: |
-        apt-get update -qq
-        apt-get install -y -qq --no-install-recommends autopkgtest dpkg-dev
-        autopkgtest --ignore-restrictions=isolation-container \
-          dist/*.dsc dist/*.deb dist/keel-deps/*.deb -- null
